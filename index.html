@@ -145,40 +145,43 @@ function showCountdown(targetTime){
 }
 
 /* メトロノーム（1拍目アクセント） */
-function scheduleClick(bpm, startDelay){
-  if(!audioContext) return;
+function scheduleClick(bpm, targetTime){
+  if(!audioContext){
+    audioContext = new (window.AudioContext||window.webkitAudioContext)();
+    gainNode = audioContext.createGain();
+    gainNode.connect(audioContext.destination);
+  }
+
+  audioContext.resume();
 
   isClicking = true;
+
   const interval = 60 / bpm;
   let beat = 0;
 
-  setTimeout(()=>{
-    function tick(){
-      if(!isClicking) return;
+  const startAt = audioContext.currentTime + (targetTime - Date.now())/1000;
 
-      const osc = audioContext.createOscillator();
-      const g = audioContext.createGain();
+  function schedule(){
+    if(!isClicking) return;
 
-      // 1拍目だけ高音
-      osc.frequency.value = (beat % 4 === 0) ? 1500 : 1000;
-      g.gain.value = 0.4;
+    const osc = audioContext.createOscillator();
+    const g = audioContext.createGain();
 
-      osc.connect(g);
-      g.connect(gainNode);
+    osc.frequency.value = (beat % 4 === 0) ? 1500 : 1000;
+    g.gain.value = 0.4;
 
-      osc.start();
-      osc.stop(audioContext.currentTime + 0.05);
+    osc.connect(g);
+    g.connect(gainNode);
 
-      beat++;
-      setTimeout(tick, interval*1000);
-    }
+    osc.start(startAt + beat * interval);
+    osc.stop(startAt + beat * interval + 0.05);
 
-    tick();
-  }, startDelay);
-}
+    beat++;
 
-function stopClick(){
-  isClicking = false;
+    setTimeout(schedule, interval*1000);
+  }
+
+  schedule();
 }
 
 /* データ監視 */
@@ -189,17 +192,14 @@ onValue(roomRef,(snapshot)=>{
   currentBpm = data.bpm || 120;
   document.getElementById("bpmDisplay").textContent = currentBpm;
 
-  if(!audioContext) return;
-
   if(data.isPlaying && data.startTime){
-    const serverStart = data.startTime;
-    const targetTime = serverStart + 4000; // 4秒後開始
 
-    const delay = targetTime - Date.now();
-    if(delay > 0){
-      showCountdown(targetTime);
-      scheduleClick(currentBpm, delay);
-    }
+    const targetTime = data.startTime + 4000;
+
+    showCountdown(targetTime);
+
+    scheduleClick(currentBpm, targetTime);
+
   }else{
     stopClick();
     document.getElementById("countdown").textContent="";
