@@ -27,9 +27,13 @@ header{
 }
 
 .bpm-controls button{
+  background:#111;
+  border:2px solid #00ff99;
+  color:#00ff99;
   font-size:20px;
   padding:10px 20px;
   margin:5px;
+  border-radius:6px;
 }
 
 .controls button{
@@ -42,7 +46,8 @@ header{
   border-radius:8px;
 }
 
-.controls button:active{
+.controls button:active,
+.bpm-controls button:active{
   background:#00ff99;
   color:#000;
 }
@@ -101,7 +106,14 @@ from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL }
 from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
-const firebaseConfig = { /* そのまま */ };
+const firebaseConfig = {
+  apiKey: "AIzaSyAqx-jpLl3Q30iTrHA5YPWJRMI9-abm1Pg",
+  authDomain: "earmonitor.firebaseapp.com",
+  projectId: "earmonitor",
+  storageBucket: "earmonitor.firebasestorage.app",
+  messagingSenderId: "504316277047",
+  appId: "1:504316277047:web:117cbb8f831dc8ba81eab2"
+};
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -112,10 +124,6 @@ const roomRef = doc(db,"rooms",roomId);
 
 let audioContext;
 let gainNode;
-let buffer;
-let source;
-let clickNodes = [];
-let timeOffset = 0;
 let currentBpm = 120;
 
 /* 音声有効化 */
@@ -123,20 +131,8 @@ document.getElementById("enableAudio").onclick = async ()=>{
   audioContext = new (window.AudioContext||window.webkitAudioContext)();
   gainNode = audioContext.createGain();
   gainNode.connect(audioContext.destination);
-  await syncServerTime();
   alert("音声準備OK");
 };
-
-/* 時刻同期 */
-async function syncServerTime(){
-  const tempRef = doc(db,"rooms","timeSync");
-  await setDoc(tempRef,{now:serverTimestamp()});
-  onSnapshot(tempRef,(snap)=>{
-    if(!snap.data()) return;
-    const serverTime = snap.data().now.toMillis();
-    timeOffset = serverTime - Date.now();
-  });
-}
 
 /* 音量 */
 document.getElementById("volume").oninput=e=>{
@@ -146,113 +142,14 @@ document.getElementById("volume").oninput=e=>{
 /* BPM変更 */
 document.getElementById("bpmUp").onclick=()=>{
   currentBpm++;
-  updateDoc(roomRef,{bpm:currentBpm});
+  document.getElementById("bpmDisplay").textContent=currentBpm;
 };
 
 document.getElementById("bpmDown").onclick=()=>{
   if(currentBpm>30) currentBpm--;
-  updateDoc(roomRef,{bpm:currentBpm});
-};
-
-/* 音源アップロード */
-document.getElementById("audioUpload").addEventListener("change",async e=>{
-  const file=e.target.files[0];
-  if(!file) return;
-  const storageRef=ref(storage,"audio/"+file.name);
-  await uploadBytes(storageRef,file);
-  const url=await getDownloadURL(storageRef);
-  await updateDoc(roomRef,{audioURL:url});
-});
-
-/* START */
-document.getElementById("startBtn").onclick=async ()=>{
-  const startAt=Date.now()+timeOffset+5000;
-  await updateDoc(roomRef,{
-    isPlaying:true,
-    startAt:startAt,
-    bpm:currentBpm,
-    updatedAt:serverTimestamp()
-  });
-};
-
-/* STOP */
-document.getElementById("stopBtn").onclick=async ()=>{
-  await updateDoc(roomRef,{isPlaying:false});
-  stopAllAudio();
-};
-
-/* 再同期 */
-document.getElementById("resyncBtn").onclick=()=>{
-  stopAllAudio();
-  syncServerTime();
-};
-
-function stopAllAudio(){
-  if(source){
-    try{ source.stop(); }catch(e){}
-  }
-  clickNodes.forEach(n=>{
-    try{ n.stop(); }catch(e){}
-  });
-  clickNodes=[];
-}
-
-/* クリック生成 */
-function playClick(startTime,bpm){
-  const interval=60/bpm;
-  for(let i=0;i<200;i++){
-    const osc=audioContext.createOscillator();
-    const g=audioContext.createGain();
-    osc.frequency.value=1000;
-    g.gain.value=0.4;
-    osc.connect(g);
-    g.connect(gainNode);
-    osc.start(startTime+i*interval);
-    osc.stop(startTime+i*interval+0.05);
-    clickNodes.push(osc);
-  }
-}
-
-/* ルーム監視 */
-onSnapshot(roomRef,async snap=>{
-  const data=snap.data();
-  if(!data||!audioContext) return;
-
-  currentBpm=data.bpm||120;
   document.getElementById("bpmDisplay").textContent=currentBpm;
-
-  if(data.audioURL && !buffer){
-    const res=await fetch(data.audioURL);
-    const arr=await res.arrayBuffer();
-    buffer=await audioContext.decodeAudioData(arr);
-  }
-
-  if(data.isPlaying){
-    document.getElementById("statusLed").classList.add("on");
-    document.getElementById("statusText").textContent="PLAYING";
-
-    stopAllAudio();
-
-    const delay=(data.startAt-Date.now()-timeOffset)/1000;
-    if(delay<0) return;
-
-    const startTime=audioContext.currentTime+delay;
-
-    if(buffer){
-      source=audioContext.createBufferSource();
-      source.buffer=buffer;
-      source.connect(gainNode);
-      source.start(startTime);
-    }
-
-    playClick(startTime,currentBpm);
-
-  }else{
-    document.getElementById("statusLed").classList.remove("on");
-    document.getElementById("statusText").textContent="STOPPED";
-    stopAllAudio();
-  }
-});
+};
 </script>
+
 </body>
 </html>
