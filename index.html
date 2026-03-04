@@ -1,39 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Sync Monitor</title>
+
+<style>
+body{
+  margin:0;
+  background:#0b0b0f;
+  color:#00ff99;
+  font-family:monospace;
+  text-align:center;
+}
+header{
+  padding:15px;
+  font-size:20px;
+  border-bottom:1px solid #00ff99;
+}
+.bpm{
+  font-size:70px;
+  text-shadow:0 0 20px #00ff99;
+  margin:20px 0;
+}
+.countdown{
+  font-size:120px;
+  height:140px;
+  margin:10px 0;
+  text-shadow:0 0 30px #00ff99;
+}
+button{
+  background:#111;
+  border:2px solid #00ff99;
+  color:#00ff99;
+  padding:15px 30px;
+  margin:10px;
+  font-size:18px;
+  border-radius:8px;
+}
+button:active{
+  background:#00ff99;
+  color:#000;
+}
+.slider{
+  width:80%;
+  margin:20px 0;
+}
+</style>
+</head>
+<body>
+
+<header>ROOM: bandroom1</header>
+
+<div class="bpm" id="bpmDisplay">120</div>
+<div class="countdown" id="countdown"></div>
+
+<button id="bpmDown">−</button>
+<button id="bpmUp">＋</button>
+
+<br><br>
+
+<button id="enableAudio">音声有効化</button>
+<button id="startBtn">START</button>
+<button id="stopBtn">STOP</button>
+
+<br><br>
+<input type="range" id="volume" class="slider" min="0" max="1" step="0.01" value="1">
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, onValue, update }
+import { getDatabase, ref, onValue, update, serverTimestamp }
 from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAqx-jpLl3Q30iTrHA5YPWJRMI9-abm1Pg",
   authDomain: "earmonitor.firebaseapp.com",
   databaseURL: "https://earmonitor-default-rtdb.firebaseio.com/",
-  projectId: "earmonitor",
-  storageBucket: "earmonitor.firebasestorage.app",
-  messagingSenderId: "504316277047",
-  appId: "1:504316277047:web:117cbb8f831dc8ba81eab2"
+  projectId: "earmonitor"
 };
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-
 const roomRef = ref(db,"rooms/bandroom1");
 
 let audioContext;
 let gainNode;
 let currentBpm = 120;
 let isClicking = false;
-let serverOffset = 0;
 
-/* ===== サーバー時間取得 ===== */
-onValue(ref(db, ".info/serverTimeOffset"), (snap)=>{
-  serverOffset = snap.val() || 0;
-});
-
-function getServerTime(){
-  return Date.now() + serverOffset;
-}
-
-/* ===== 音声有効化 ===== */
+/* 音声有効化 */
 document.getElementById("enableAudio").onclick = async ()=>{
   audioContext = new (window.AudioContext||window.webkitAudioContext)();
   gainNode = audioContext.createGain();
@@ -42,12 +97,12 @@ document.getElementById("enableAudio").onclick = async ()=>{
   alert("音声準備OK");
 };
 
-/* ===== 音量 ===== */
+/* 音量 */
 document.getElementById("volume").oninput=e=>{
   if(gainNode) gainNode.gain.value=e.target.value;
 };
 
-/* ===== BPM変更 ===== */
+/* BPM変更 */
 document.getElementById("bpmUp").onclick=()=>{
   currentBpm++;
   update(roomRef,{ bpm: currentBpm });
@@ -57,69 +112,76 @@ document.getElementById("bpmDown").onclick=()=>{
   update(roomRef,{ bpm: currentBpm });
 };
 
-/* ===== START（4秒後） ===== */
+/* START（サーバー基準＋4秒後開始） */
 document.getElementById("startBtn").onclick=()=>{
-  const startAt = getServerTime() + 4000;
-
   update(roomRef,{
     isPlaying: true,
     bpm: currentBpm,
-    startAt: startAt
+    startTime: serverTimestamp()
   });
 };
 
-/* ===== STOP ===== */
 document.getElementById("stopBtn").onclick=()=>{
-  update(roomRef,{ isPlaying:false });
+  update(roomRef,{ isPlaying: false });
   stopClick();
 };
 
-/* ===== クリック再生 ===== */
-function scheduleClick(startAt, bpm){
-  if(!audioContext) return;
+/* カウントダウン表示 */
+function showCountdown(targetTime){
+  const el = document.getElementById("countdown");
 
-  const interval = 60 / bpm;
-  const now = getServerTime();
-  const delay = (startAt - now) / 1000;
-
-  if(delay < 0) return;
-
-  const startTime = audioContext.currentTime + delay;
-  let nextTime = startTime;
-  isClicking = true;
-
-  function tick(){
-    if(!isClicking) return;
-
-    const osc = audioContext.createOscillator();
-    const g = audioContext.createGain();
-
-    osc.frequency.value = 1000;
-    g.gain.value = 0.4;
-
-    osc.connect(g);
-    g.connect(gainNode);
-
-    osc.start(nextTime);
-    osc.stop(nextTime + 0.05);
-
-    nextTime += interval;
-
-    if(nextTime < audioContext.currentTime + 1){
-      requestAnimationFrame(tick);
+  function updateCount(){
+    const diff = targetTime - Date.now();
+    if(diff > 0){
+      const sec = Math.ceil(diff / 1000);
+      el.textContent = sec;
+      requestAnimationFrame(updateCount);
     }else{
-      setTimeout(tick, 50);
+      el.textContent = "";
     }
   }
 
-  tick();
+  updateCount();
+}
+
+/* メトロノーム（1拍目アクセント） */
+function scheduleClick(bpm, startDelay){
+  if(!audioContext) return;
+
+  isClicking = true;
+  const interval = 60 / bpm;
+  let beat = 0;
+
+  setTimeout(()=>{
+    function tick(){
+      if(!isClicking) return;
+
+      const osc = audioContext.createOscillator();
+      const g = audioContext.createGain();
+
+      // 1拍目だけ高音
+      osc.frequency.value = (beat % 4 === 0) ? 1500 : 1000;
+      g.gain.value = 0.4;
+
+      osc.connect(g);
+      g.connect(gainNode);
+
+      osc.start();
+      osc.stop(audioContext.currentTime + 0.05);
+
+      beat++;
+      setTimeout(tick, interval*1000);
+    }
+
+    tick();
+  }, startDelay);
 }
 
 function stopClick(){
   isClicking = false;
 }
 
-/* ===== データ監視 ===== */
+/* データ監視 */
 onValue(roomRef,(snapshot)=>{
   const data = snapshot.val();
   if(!data) return;
@@ -129,10 +191,20 @@ onValue(roomRef,(snapshot)=>{
 
   if(!audioContext) return;
 
-  if(data.isPlaying && data.startAt){
-    scheduleClick(data.startAt, currentBpm);
+  if(data.isPlaying && data.startTime){
+    const serverStart = data.startTime;
+    const targetTime = serverStart + 4000; // 4秒後開始
+
+    const delay = targetTime - Date.now();
+    if(delay > 0){
+      showCountdown(targetTime);
+      scheduleClick(currentBpm, delay);
+    }
   }else{
     stopClick();
+    document.getElementById("countdown").textContent="";
   }
 });
 </script>
+</body>
+</html>
