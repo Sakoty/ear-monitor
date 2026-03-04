@@ -157,41 +157,40 @@ function scheduleClick(bpm, targetTime){
 
   isClicking = true;
 
-  const interval = 60 / bpm;
+  const intervalMs = (60 / bpm) * 1000;
   let beat = 0;
 
-  const startAt = audioContext.currentTime + (targetTime - Date.now())/1000;
+  const delay = targetTime - Date.now();
 
-  function scheduler(){
+  setTimeout(()=>{
 
     if(!isClicking) return;
 
-    const now = audioContext.currentTime;
+    const timer = setInterval(()=>{
 
-    while(startAt + beat * interval < now + 0.2){
+      if(!isClicking){
+        clearInterval(timer);
+        return;
+      }
 
       const osc = audioContext.createOscillator();
       const g = audioContext.createGain();
 
-      // 表拍のみ（4拍子想定）
+      // 1拍目だけ高音
       osc.frequency.value = (beat % 4 === 0) ? 1500 : 1000;
       g.gain.value = 0.4;
 
       osc.connect(g);
       g.connect(gainNode);
 
-      const clickTime = startAt + beat * interval;
-
-      osc.start(clickTime);
-      osc.stop(clickTime + 0.05);
+      osc.start();
+      osc.stop(audioContext.currentTime + 0.05);
 
       beat++;
-    }
 
-    requestAnimationFrame(scheduler);
-  }
+    }, intervalMs);
 
-  scheduler();
+  }, delay);
 }
 
 /* データ監視 */
