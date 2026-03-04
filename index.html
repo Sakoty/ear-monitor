@@ -146,6 +146,7 @@ function showCountdown(targetTime){
 
 /* メトロノーム（1拍目アクセント） */
 function scheduleClick(bpm, targetTime){
+
   if(!audioContext){
     audioContext = new (window.AudioContext||window.webkitAudioContext)();
     gainNode = audioContext.createGain();
@@ -161,27 +162,36 @@ function scheduleClick(bpm, targetTime){
 
   const startAt = audioContext.currentTime + (targetTime - Date.now())/1000;
 
-  function schedule(){
+  function scheduler(){
+
     if(!isClicking) return;
 
-    const osc = audioContext.createOscillator();
-    const g = audioContext.createGain();
+    const now = audioContext.currentTime;
 
-    osc.frequency.value = (beat % 4 === 0) ? 1500 : 1000;
-    g.gain.value = 0.4;
+    while(startAt + beat * interval < now + 0.2){
 
-    osc.connect(g);
-    g.connect(gainNode);
+      const osc = audioContext.createOscillator();
+      const g = audioContext.createGain();
 
-    osc.start(startAt + beat * interval);
-    osc.stop(startAt + beat * interval + 0.05);
+      // 表拍のみ（4拍子想定）
+      osc.frequency.value = (beat % 4 === 0) ? 1500 : 1000;
+      g.gain.value = 0.4;
 
-    beat++;
+      osc.connect(g);
+      g.connect(gainNode);
 
-    setTimeout(schedule, interval*1000);
+      const clickTime = startAt + beat * interval;
+
+      osc.start(clickTime);
+      osc.stop(clickTime + 0.05);
+
+      beat++;
+    }
+
+    requestAnimationFrame(scheduler);
   }
 
-  schedule();
+  scheduler();
 }
 
 /* データ監視 */
