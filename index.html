@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Sync Monitor</title>
+
+<style>
+body{
+  margin:0;
+  background:#0b0b0f;
+  color:#00ff99;
+  font-family:monospace;
+  text-align:center;
+}
+
+header{
+  padding:15px;
+  font-size:20px;
+  border-bottom:1px solid #00ff99;
+}
+
+.bpm{
+  font-size:70px;
+  text-shadow:0 0 20px #00ff99;
+  margin:20px 0;
+}
+
+.bpm-controls button{
+  font-size:20px;
+  padding:10px 20px;
+  margin:5px;
+}
+
+.controls button{
+  background:#111;
+  border:2px solid #00ff99;
+  color:#00ff99;
+  padding:15px 30px;
+  margin:10px;
+  font-size:18px;
+  border-radius:8px;
+}
+
+.controls button:active{
+  background:#00ff99;
+  color:#000;
+}
+
+.slider{
+  width:80%;
+  margin:20px 0;
+}
+
+.led{
+  width:15px;
+  height:15px;
+  border-radius:50%;
+  display:inline-block;
+  background:#111;
+  box-shadow:0 0 10px #000;
+}
+
+.led.on{
+  background:#ff0033;
+  box-shadow:0 0 15px #ff0033;
+}
+</style>
+</head>
+<body>
+
+<header>ROOM: bandroom1</header>
+
+<div class="bpm" id="bpmDisplay">120</div>
+
+<div class="bpm-controls">
+  <button id="bpmDown">−</button>
+  <button id="bpmUp">＋</button>
+</div>
+
+<div>
+  <div class="led" id="statusLed"></div>
+  <p id="statusText">STOPPED</p>
+</div>
+
+<div class="controls">
+  <button id="enableAudio">音声有効化</button><br>
+  <input type="file" id="audioUpload"><br>
+  <button id="startBtn">START (5秒後)</button>
+  <button id="stopBtn">STOP</button>
+  <button id="resyncBtn">再同期</button>
+</div>
+
+<h3>自分の音量</h3>
+<input type="range" id="volume" class="slider" min="0" max="1" step="0.01" value="1">
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import { getFirestore, doc, setDoc, updateDoc, onSnapshot, serverTimestamp }
+from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getStorage, ref, uploadBytes, getDownloadURL }
+from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+
+const firebaseConfig = { /* そのまま */ };
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const storage = getStorage(app);
+
+const roomId = "bandroom1";
+const roomRef = doc(db,"rooms",roomId);
+
+let audioContext;
+let gainNode;
+let buffer;
+let source;
+let clickNodes = [];
+let timeOffset = 0;
+let currentBpm = 120;
+
+/* 音声有効化 */
+document.getElementById("enableAudio").onclick = async ()=>{
+  audioContext = new (window.AudioContext||window.webkitAudioContext)();
+  gainNode = audioContext.createGain();
+  gainNode.connect(audioContext.destination);
+  await syncServerTime();
+  alert("音声準備OK");
+};
+
+/* 時刻同期 */
+async function syncServerTime(){
+  const tempRef = doc(db,"rooms","timeSync");
+  await setDoc(tempRef,{now:serverTimestamp()});
+  onSnapshot(tempRef,(snap)=>{
+    if(!snap.data()) return;
+    const serverTime = snap.data().now.toMillis();
+    timeOffset = serverTime - Date.now();
+  });
+}
+
+/* 音量 */
+document.getElementById("volume").oninput=e=>{
+  if(gainNode) gainNode.gain.value=e.target.value;
+};
+
+/* BPM変更 */
+document.getElementById("bpmUp").onclick=()=>{
+  currentBpm++;
+  updateDoc(roomRef,{bpm:currentBpm});
+};
+
+document.getElementById("bpmDown").onclick=()=>{
+  if(currentBpm>30) currentBpm--;
+  updateDoc(roomRef,{bpm:currentBpm});
+};
+
+/* 音源アップロード */
+document.getElementById("audioUpload").addEventListener("change",async e=>{
+  const file=e.target.files[0];
+  if(!file) return;
+  const storageRef=ref(storage,"audio/"+file.name);
+  await uploadBytes(storageRef,file);
+  const url=await getDownloadURL(storageRef);
+  await updateDoc(roomRef,{audioURL:url});
+});
+
+/* START */
+document.getElementById("startBtn").onclick=async ()=>{
+  const startAt=Date.now()+timeOffset+5000;
+  await updateDoc(roomRef,{
+    isPlaying:true,
+    startAt:startAt,
+    bpm:currentBpm,
+    updatedAt:serverTimestamp()
+  });
+};
+
+/* STOP */
+document.getElementById("stopBtn").onclick=async ()=>{
+  await updateDoc(roomRef,{isPlaying:false});
+  stopAllAudio();
+};
+
+/* 再同期 */
+document.getElementById("resyncBtn").onclick=()=>{
+  stopAllAudio();
+  syncServerTime();
+};
+
+function stopAllAudio(){
+  if(source){
+    try{ source.stop(); }catch(e){}
+  }
+  clickNodes.forEach(n=>{
+    try{ n.stop(); }catch(e){}
+  });
+  clickNodes=[];
+}
+
+/* クリック生成 */
+function playClick(startTime,bpm){
+  const interval=60/bpm;
+  for(let i=0;i<200;i++){
+    const osc=audioContext.createOscillator();
+    const g=audioContext.createGain();
+    osc.frequency.value=1000;
+    g.gain.value=0.4;
+    osc.connect(g);
+    g.connect(gainNode);
+    osc.start(startTime+i*interval);
+    osc.stop(startTime+i*interval+0.05);
+    clickNodes.push(osc);
+  }
+}
+
+/* ルーム監視 */
+onSnapshot(roomRef,async snap=>{
+  const data=snap.data();
+  if(!data||!audioContext) return;
+
+  currentBpm=data.bpm||120;
+  document.getElementById("bpmDisplay").textContent=currentBpm;
+
+  if(data.audioURL && !buffer){
+    const res=await fetch(data.audioURL);
+    const arr=await res.arrayBuffer();
+    buffer=await audioContext.decodeAudioData(arr);
+  }
+
+  if(data.isPlaying){
+    document.getElementById("statusLed").classList.add("on");
+    document.getElementById("statusText").textContent="PLAYING";
+
+    stopAllAudio();
+
+    const delay=(data.startAt-Date.now()-timeOffset)/1000;
+    if(delay<0) return;
+
+    const startTime=audioContext.currentTime+delay;
+
+    if(buffer){
+      source=audioContext.createBufferSource();
+      source.buffer=buffer;
+      source.connect(gainNode);
+      source.start(startTime);
+    }
+
+    playClick(startTime,currentBpm);
+
+  }else{
+    document.getElementById("statusLed").classList.remove("on");
+    document.getElementById("statusText").textContent="STOPPED";
+    stopAllAudio();
+  }
+});
+</script>
+</body>
+</html>
