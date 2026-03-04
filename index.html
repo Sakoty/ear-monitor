@@ -1,67 +1,6 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Live Sync Monitor</title>
-
-<style>
-body{
-  margin:0;
-  background:#0b0b0f;
-  color:#00ff99;
-  font-family:monospace;
-  text-align:center;
-}
-header{
-  padding:15px;
-  font-size:20px;
-  border-bottom:1px solid #00ff99;
-}
-.bpm{
-  font-size:70px;
-  text-shadow:0 0 20px #00ff99;
-  margin:20px 0;
-}
-button{
-  background:#111;
-  border:2px solid #00ff99;
-  color:#00ff99;
-  padding:15px 30px;
-  margin:10px;
-  font-size:18px;
-  border-radius:8px;
-}
-button:active{
-  background:#00ff99;
-  color:#000;
-}
-.slider{
-  width:80%;
-  margin:20px 0;
-}
-</style>
-</head>
-<body>
-
-<header>ROOM: bandroom1</header>
-
-<div class="bpm" id="bpmDisplay">120</div>
-<button id="bpmDown">−</button>
-<button id="bpmUp">＋</button>
-
-<br><br>
-
-<button id="enableAudio">音声有効化</button>
-<button id="startBtn">START</button>
-<button id="stopBtn">STOP</button>
-
-<br><br>
-<input type="range" id="volume" class="slider" min="0" max="1" step="0.01" value="1">
-
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, set, onValue, update }
+import { getDatabase, ref, onValue, update }
 from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
 const firebaseConfig = {
@@ -82,26 +21,33 @@ const roomRef = ref(db,"rooms/bandroom1");
 let audioContext;
 let gainNode;
 let currentBpm = 120;
+let isClicking = false;
+let serverOffset = 0;
 
-/* 音声有効化 */
+/* ===== サーバー時間取得 ===== */
+onValue(ref(db, ".info/serverTimeOffset"), (snap)=>{
+  serverOffset = snap.val() || 0;
+});
+
+function getServerTime(){
+  return Date.now() + serverOffset;
+}
+
+/* ===== 音声有効化 ===== */
 document.getElementById("enableAudio").onclick = async ()=>{
   audioContext = new (window.AudioContext||window.webkitAudioContext)();
   gainNode = audioContext.createGain();
   gainNode.connect(audioContext.destination);
-
-  if (audioContext.state === "suspended") {
-    await audioContext.resume();
-  }
-
+  await audioContext.resume();
   alert("音声準備OK");
 };
 
-/* 音量 */
+/* ===== 音量 ===== */
 document.getElementById("volume").oninput=e=>{
   if(gainNode) gainNode.gain.value=e.target.value;
 };
 
-/* BPM変更 */
+/* ===== BPM変更 ===== */
 document.getElementById("bpmUp").onclick=()=>{
   currentBpm++;
   update(roomRef,{ bpm: currentBpm });
@@ -111,35 +57,36 @@ document.getElementById("bpmDown").onclick=()=>{
   update(roomRef,{ bpm: currentBpm });
 };
 
-/* START */
+/* ===== START（4秒後） ===== */
 document.getElementById("startBtn").onclick=()=>{
+  const startAt = getServerTime() + 4000;
+
   update(roomRef,{
     isPlaying: true,
-    bpm: currentBpm
+    bpm: currentBpm,
+    startAt: startAt
   });
 };
 
-/* STOP */
+/* ===== STOP ===== */
 document.getElementById("stopBtn").onclick=()=>{
-  update(roomRef,{
-    isPlaying: false
-  });
+  update(roomRef,{ isPlaying:false });
   stopClick();
 };
 
-/* クリック音 */
-let isClicking = false;
-
-function scheduleClick(bpm){
+/* ===== クリック再生 ===== */
+function scheduleClick(startAt, bpm){
   if(!audioContext) return;
 
-  if (audioContext.state === "suspended") {
-    audioContext.resume();
-  }
-
-  isClicking = true;
   const interval = 60 / bpm;
-  let nextTime = audioContext.currentTime;
+  const now = getServerTime();
+  const delay = (startAt - now) / 1000;
+
+  if(delay < 0) return;
+
+  const startTime = audioContext.currentTime + delay;
+  let nextTime = startTime;
+  isClicking = true;
 
   function tick(){
     if(!isClicking) return;
@@ -158,7 +105,7 @@ function scheduleClick(bpm){
 
     nextTime += interval;
 
-    if(nextTime < audioContext.currentTime + 0.5){
+    if(nextTime < audioContext.currentTime + 1){
       requestAnimationFrame(tick);
     }else{
       setTimeout(tick, 50);
@@ -172,7 +119,7 @@ function stopClick(){
   isClicking = false;
 }
 
-/* データ監視 */
+/* ===== データ監視 ===== */
 onValue(roomRef,(snapshot)=>{
   const data = snapshot.val();
   if(!data) return;
@@ -182,12 +129,10 @@ onValue(roomRef,(snapshot)=>{
 
   if(!audioContext) return;
 
- if(data.isPlaying){
-  scheduleClick(currentBpm);
-}else{
-  stopClick();
-}
+  if(data.isPlaying && data.startAt){
+    scheduleClick(data.startAt, currentBpm);
+  }else{
+    stopClick();
+  }
 });
 </script>
-</body>
-</html>
