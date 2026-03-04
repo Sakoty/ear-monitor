@@ -85,10 +85,15 @@ let clickInterval;
 let currentBpm = 120;
 
 /* 音声有効化 */
-document.getElementById("enableAudio").onclick = ()=>{
+document.getElementById("enableAudio").onclick = async ()=>{
   audioContext = new (window.AudioContext||window.webkitAudioContext)();
   gainNode = audioContext.createGain();
   gainNode.connect(audioContext.destination);
+
+  if (audioContext.state === "suspended") {
+    await audioContext.resume();
+  }
+
   alert("音声準備OK");
 };
 
