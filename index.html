@@ -101,7 +101,14 @@ from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL }
 from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
-const firebaseConfig = { /* そのまま */ };
+const firebaseConfig = const firebaseConfig = {
+  apiKey: "AIzaSyAqx-jpLl3Q30iTrHA5YPWJRMI9-abm1Pg",
+  authDomain: "earmonitor.firebaseapp.com",
+  projectId: "earmonitor",
+  storageBucket: "earmonitor.firebasestorage.app",
+  messagingSenderId: "504316277047",
+  appId: "1:504316277047:web:117cbb8f831dc8ba81eab2"
+ };
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
