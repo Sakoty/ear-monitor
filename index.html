@@ -2,85 +2,62 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Live Sync Monitor</title>
+<title>Band Sync Monitor</title>
 
 <style>
 
 body{
-margin:0;
 background:#0b0b0f;
-color:#00ff99;
+color:#00ffaa;
 font-family:monospace;
 text-align:center;
 }
 
-header{
-padding:15px;
-font-size:20px;
-border-bottom:1px solid #00ff99;
-}
-
-.bpm{
-font-size:70px;
-text-shadow:0 0 20px #00ff99;
-margin:20px 0;
-}
-
-.count{
-font-size:90px;
-height:100px;
-}
-
-.led{
-width:20px;
-height:20px;
-border-radius:50%;
-display:inline-block;
-background:#111;
-box-shadow:0 0 10px #000;
-margin:10px;
-}
-
-.led.on{
-background:#ff0033;
-box-shadow:0 0 20px #ff0033;
+.panel{
+padding:20px;
 }
 
 button{
 background:#111;
-border:2px solid #00ff99;
-color:#00ff99;
-padding:15px 30px;
+border:2px solid #00ffaa;
+color:#00ffaa;
+padding:12px 30px;
 margin:10px;
-font-size:18px;
+font-size:16px;
 border-radius:8px;
 }
 
-button:active{
-background:#00ff99;
-color:#000;
+button:hover{
+background:#00ffaa;
+color:black;
 }
 
 .slider{
 width:80%;
-margin:20px 0;
+margin:10px;
+}
+
+#bpmDisplay{
+font-size:60px;
+text-shadow:0 0 20px #00ffaa;
+}
+
+input{
+margin:10px;
 }
 
 </style>
 </head>
 <body>
 
-<header>ROOM : bandroom1</header>
+<div class="panel">
 
-<div class="bpm" id="bpmDisplay">120</div>
+<h2>Band Sync Room</h2>
 
-<button id="bpmDown">−</button>
-<button id="bpmUp">＋</button>
+<div id="bpmDisplay">120 BPM</div>
 
-<div class="count" id="countdown"></div>
-
-<div class="led" id="tempoLed"></div>
+<input type="range" id="bpmSlider" class="slider"
+min="60" max="200" value="120">
 
 <br>
 
@@ -88,212 +65,312 @@ margin:20px 0;
 <button id="startBtn">START</button>
 <button id="stopBtn">STOP</button>
 
-<br>
+<br><br>
 
-<input type="range" id="volume" class="slider" min="0" max="1" step="0.01" value="1">
+<h3>MP3共有</h3>
+<input type="file" id="audioUpload">
+
+<h3>YouTube共有</h3>
+<input type="text" id="youtubeURL" placeholder="YouTube URL">
+<button id="setYoutube">共有</button>
+
+<br><br>
+
+<div id="youtubePlayer"></div>
+
+</div>
 
 <script type="module">
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, onValue, update }
-from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+import { initializeApp }
+from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 
-const firebaseConfig={
-apiKey:"AIzaSyAqx-jpLl3Q30iTrHA5YPWJRMI9-abm1Pg",
-authDomain:"earmonitor.firebaseapp.com",
-databaseURL:"https://earmonitor-default-rtdb.firebaseio.com/",
-projectId:"earmonitor",
-storageBucket:"earmonitor.firebasestorage.app",
-messagingSenderId:"504316277047",
-appId:"1:504316277047:web:117cbb8f831dc8ba81eab2"
+import {
+getFirestore,
+doc,
+setDoc,
+updateDoc,
+onSnapshot,
+serverTimestamp
+}
+from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+import {
+getStorage,
+ref,
+uploadBytes,
+getDownloadURL
+}
+from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+
+
+/* Firebase設定 */
+const firebaseConfig = {
+
 };
 
-const app=initializeApp(firebaseConfig);
-const db=getDatabase(app);
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const storage = getStorage(app);
 
-const roomRef=ref(db,"rooms/bandroom1");
+const roomId="bandroom";
+const roomRef=doc(db,"rooms",roomId);
 
 let audioContext;
 let gainNode;
 
-let currentBpm=120;
+let buffer;
+let source;
 
-let startTimeout=null;
-let intervalTimer=null;
-let countTimer=null;
+let bpm=120;
 
-let running=false;
+let timeOffset=0;
+
+let nextClickTime=0;
+
+let clickInterval;
+
+
+/* 音声有効化 */
 
 document.getElementById("enableAudio").onclick=async()=>{
 
 audioContext=new(window.AudioContext||window.webkitAudioContext)();
 
 gainNode=audioContext.createGain();
-gainNode.gain.value=1;
+
 gainNode.connect(audioContext.destination);
 
-await audioContext.resume();
+await syncServerTime();
+
+alert("Audio Ready");
 
 };
 
-document.getElementById("volume").oninput=e=>{
-if(gainNode)gainNode.gain.value=e.target.value;
+
+/* サーバー時刻同期 */
+
+async function syncServerTime(){
+
+const refDoc=doc(db,"rooms","timeSync");
+
+await setDoc(refDoc,{now:serverTimestamp()});
+
+onSnapshot(refDoc,(snap)=>{
+
+if(!snap.data())return;
+
+const serverTime=snap.data().now.toMillis();
+
+const localTime=Date.now();
+
+timeOffset=serverTime-localTime;
+
+});
+
+}
+
+
+/* BPMスライダー */
+
+const bpmSlider=document.getElementById("bpmSlider");
+
+bpmSlider.oninput=async(e)=>{
+
+bpm=e.target.value;
+
+document.getElementById("bpmDisplay").innerText=bpm+" BPM";
+
+await updateDoc(roomRef,{bpm:bpm});
+
 };
 
-document.getElementById("bpmUp").onclick=()=>{
-currentBpm++;
-update(roomRef,{bpm:currentBpm});
+
+/* MP3アップロード */
+
+document.getElementById("audioUpload")
+.addEventListener("change",async(e)=>{
+
+const file=e.target.files[0];
+
+const storageRef=ref(storage,"audio/"+file.name);
+
+await uploadBytes(storageRef,file);
+
+const url=await getDownloadURL(storageRef);
+
+await updateDoc(roomRef,{audioURL:url});
+
+});
+
+
+/* YouTube共有 */
+
+document.getElementById("setYoutube").onclick=async()=>{
+
+const url=document.getElementById("youtubeURL").value;
+
+await updateDoc(roomRef,{youtube:url});
+
 };
 
-document.getElementById("bpmDown").onclick=()=>{
-if(currentBpm>30)currentBpm--;
-update(roomRef,{bpm:currentBpm});
-};
 
-document.getElementById("startBtn").onclick=()=>{
 
-const startTime=Date.now()+2000;
+/* メトロノーム */
 
-update(roomRef,{
+function startMetronome(startTime){
+
+const interval=60/bpm;
+
+nextClickTime=startTime;
+
+clickInterval=setInterval(()=>{
+
+while(nextClickTime<audioContext.currentTime+0.1){
+
+const osc=audioContext.createOscillator();
+
+const gain=audioContext.createGain();
+
+osc.frequency.value=1000;
+
+gain.gain.value=0.7;
+
+osc.connect(gain);
+
+gain.connect(gainNode);
+
+osc.start(nextClickTime);
+
+osc.stop(nextClickTime+0.05);
+
+nextClickTime+=interval;
+
+}
+
+},25);
+
+}
+
+
+/* START */
+
+document.getElementById("startBtn").onclick=async()=>{
+
+const startAt=Date.now()+timeOffset+5000;
+
+await updateDoc(roomRef,{
+
 isPlaying:true,
-bpm:currentBpm,
-startAt:startTime
+
+startAt:startAt,
+
+updatedAt:serverTimestamp()
+
 });
 
 };
 
-document.getElementById("stopBtn").onclick=()=>{
-update(roomRef,{isPlaying:false});
-stopAll();
+
+/* STOP */
+
+document.getElementById("stopBtn").onclick=async()=>{
+
+await updateDoc(roomRef,{isPlaying:false});
+
+if(source)source.stop();
+
+clearInterval(clickInterval);
+
 };
 
-function stopAll(){
 
-running=false;
 
-if(startTimeout)clearTimeout(startTimeout);
-if(intervalTimer)clearInterval(intervalTimer);
-if(countTimer)clearInterval(countTimer);
+/* ルーム監視 */
 
-startTimeout=null;
-intervalTimer=null;
-countTimer=null;
+onSnapshot(roomRef,async(snap)=>{
 
-document.getElementById("countdown").textContent="";
+const data=snap.data();
 
-}
-
-function startSequence(bpm,startAt){
-
-if(running)return;
-
-running=true;
-
-const interval=(60/bpm)*1000;
-
-const delay=startAt-Date.now();
-
-startTimeout=setTimeout(()=>{
-
-let count=4;
-
-document.getElementById("countdown").textContent=count;
-
-countTimer=setInterval(()=>{
-
-playClick(true);
-
-flashLed();
-
-count--;
-
-if(count>0){
-
-document.getElementById("countdown").textContent=count;
-
-}else{
-
-clearInterval(countTimer);
-
-document.getElementById("countdown").textContent="";
-
-startMetronome();
-
-}
-
-},interval);
-
-},delay);
-
-function startMetronome(){
-
-intervalTimer=setInterval(()=>{
-
-playClick(true);
-
-flashLed();
-
-},interval);
-
-}
-
-}
-
-function playClick(){
-
-if(!audioContext)return;
-
-if(audioContext.state==="suspended"){
-audioContext.resume();
-}
-
-const osc=audioContext.createOscillator();
-const gain=audioContext.createGain();
-
-osc.frequency.value=1600;
-gain.gain.value=0.4;
-
-osc.connect(gain);
-gain.connect(gainNode);
-
-osc.start();
-osc.stop(audioContext.currentTime+0.05);
-
-}
-
-function flashLed(){
-
-const led=document.getElementById("tempoLed");
-
-led.classList.add("on");
-
-setTimeout(()=>{
-led.classList.remove("on");
-},100);
-
-}
-
-onValue(roomRef,(snap)=>{
-
-const data=snap.val();
 if(!data)return;
 
-currentBpm=data.bpm||120;
-document.getElementById("bpmDisplay").textContent=currentBpm;
 
-if(!audioContext)return;
+
+/* BPM同期 */
+
+if(data.bpm){
+
+bpm=data.bpm;
+
+document.getElementById("bpmSlider").value=bpm;
+
+document.getElementById("bpmDisplay").innerText=bpm+" BPM";
+
+}
+
+
+
+/* MP3ロード */
+
+if(data.audioURL && !buffer){
+
+const res=await fetch(data.audioURL);
+
+const arr=await res.arrayBuffer();
+
+buffer=await audioContext.decodeAudioData(arr);
+
+}
+
+
+
+/* YouTube表示 */
+
+if(data.youtube){
+
+const id=data.youtube.split("v=")[1];
+
+document.getElementById("youtubePlayer").innerHTML=
+
+`<iframe width="300" height="170"
+src="https://www.youtube.com/embed/${id}"
+allow="autoplay"></iframe>`;
+
+}
+
+
+
+/* 再生 */
 
 if(data.isPlaying){
 
-startSequence(currentBpm,data.startAt);
+const delay=(data.startAt-Date.now()-timeOffset)/1000;
 
-}else{
+if(buffer){
 
-stopAll();
+source=audioContext.createBufferSource();
+
+source.buffer=buffer;
+
+source.connect(gainNode);
+
+source.start(audioContext.currentTime+delay);
 
 }
 
+startMetronome(audioContext.currentTime+delay);
+
+}
+
+
+
 });
+
+
+
+/* 定期再同期（ズレ防止） */
+
+setInterval(syncServerTime,10000);
 
 </script>
 
