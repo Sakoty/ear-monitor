@@ -7,20 +7,39 @@
 <style>
 
 body{
-background:#0b0b0f;
-color:#00ffaa;
+background:#070707;
+color:#00ff9c;
 font-family:monospace;
 text-align:center;
+margin:0;
 }
+
+/* パネル */
 
 .panel{
 padding:20px;
 }
 
+/* BPM表示 */
+
+#bpmDisplay{
+font-size:70px;
+text-shadow:0 0 20px #00ff9c;
+margin-top:20px;
+}
+
+/* スライダー */
+
+.slider{
+width:80%;
+}
+
+/* ボタン */
+
 button{
 background:#111;
-border:2px solid #00ffaa;
-color:#00ffaa;
+border:2px solid #00ff9c;
+color:#00ff9c;
 padding:12px 30px;
 margin:10px;
 font-size:16px;
@@ -28,55 +47,128 @@ border-radius:8px;
 }
 
 button:hover{
-background:#00ffaa;
+background:#00ff9c;
 color:black;
 }
 
-.slider{
-width:80%;
-margin:10px;
+/* LED */
+
+.led{
+width:15px;
+height:15px;
+border-radius:50%;
+display:inline-block;
+margin-left:10px;
+background:#111;
+box-shadow:0 0 10px #000;
 }
 
-#bpmDisplay{
-font-size:60px;
-text-shadow:0 0 20px #00ffaa;
+.led.on{
+background:#ff0033;
+box-shadow:0 0 20px #ff0033;
 }
 
-input{
-margin:10px;
+/* フェーダー */
+
+.faderContainer{
+margin-top:30px;
+}
+
+.fader{
+writing-mode: bt-lr;
+-webkit-appearance: slider-vertical;
+width:30px;
+height:200px;
+}
+
+/* VUメーター */
+
+.vu{
+width:200px;
+height:15px;
+background:#222;
+margin:auto;
+border-radius:5px;
+overflow:hidden;
+}
+
+.vuBar{
+height:100%;
+width:0%;
+background:#00ff9c;
+box-shadow:0 0 10px #00ff9c;
+}
+
+/* 接続人数 */
+
+#memberCount{
+font-size:20px;
+margin-top:10px;
 }
 
 </style>
 </head>
+
 <body>
 
 <div class="panel">
 
-<h2>Band Sync Room</h2>
+<h2>BAND MONITOR</h2>
+
+<div id="memberCount">接続人数: 0</div>
 
 <div id="bpmDisplay">120 BPM</div>
 
-<input type="range" id="bpmSlider" class="slider"
-min="60" max="200" value="120">
+<input type="range"
+id="bpmSlider"
+class="slider"
+min="60"
+max="200"
+value="120">
 
 <br>
 
-<button id="enableAudio">音声有効化</button>
+<button id="enableAudio">Audio ON</button>
 <button id="startBtn">START</button>
 <button id="stopBtn">STOP</button>
+
+<span class="led" id="playLED"></span>
 
 <br><br>
 
 <h3>MP3共有</h3>
+
 <input type="file" id="audioUpload">
 
 <h3>YouTube共有</h3>
-<input type="text" id="youtubeURL" placeholder="YouTube URL">
+
+<input type="text"
+id="youtubeURL"
+placeholder="YouTube URL">
+
 <button id="setYoutube">共有</button>
 
 <br><br>
 
 <div id="youtubePlayer"></div>
+
+<div class="faderContainer">
+
+<p>自分の音量</p>
+
+<input type="range"
+min="0"
+max="1"
+step="0.01"
+value="1"
+id="volumeFader"
+class="fader">
+
+</div>
+
+<div class="vu">
+<div class="vuBar" id="vuBar"></div>
+</div>
 
 </div>
 
@@ -91,7 +183,9 @@ doc,
 setDoc,
 updateDoc,
 onSnapshot,
-serverTimestamp
+serverTimestamp,
+collection,
+deleteDoc
 }
 from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
@@ -104,29 +198,67 @@ getDownloadURL
 from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
 
-/* Firebase設定 */
-const firebaseConfig = {
+const firebaseConfig={
 
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const storage = getStorage(app);
+
+const app=initializeApp(firebaseConfig);
+
+const db=getFirestore(app);
+
+const storage=getStorage(app);
 
 const roomId="bandroom";
+
 const roomRef=doc(db,"rooms",roomId);
 
+const membersRef=collection(db,"rooms",roomId,"members");
+
+const memberId=Math.random().toString(36).substring(2,9);
+
+
+/* 接続登録 */
+
+await setDoc(doc(membersRef,memberId),{
+
+joined:Date.now()
+
+});
+
+
+window.addEventListener("beforeunload",()=>{
+
+deleteDoc(doc(membersRef,memberId))
+
+});
+
+
+/* 接続人数監視 */
+
+onSnapshot(membersRef,(snap)=>{
+
+document.getElementById("memberCount")
+.innerText="接続人数: "+snap.size
+
+});
+
+
 let audioContext;
+
 let gainNode;
 
+let analyser;
+
 let buffer;
+
 let source;
 
 let bpm=120;
 
 let timeOffset=0;
 
-let nextClickTime=0;
+let nextClickTime;
 
 let clickInterval;
 
@@ -139,47 +271,34 @@ audioContext=new(window.AudioContext||window.webkitAudioContext)();
 
 gainNode=audioContext.createGain();
 
-gainNode.connect(audioContext.destination);
+analyser=audioContext.createAnalyser();
+
+gainNode.connect(analyser);
+
+analyser.connect(audioContext.destination);
 
 await syncServerTime();
-
-alert("Audio Ready");
 
 };
 
 
-/* サーバー時刻同期 */
+/* 個人音量フェーダー */
 
-async function syncServerTime(){
+document.getElementById("volumeFader").oninput=(e)=>{
 
-const refDoc=doc(db,"rooms","timeSync");
+gainNode.gain.value=e.target.value;
 
-await setDoc(refDoc,{now:serverTimestamp()});
-
-onSnapshot(refDoc,(snap)=>{
-
-if(!snap.data())return;
-
-const serverTime=snap.data().now.toMillis();
-
-const localTime=Date.now();
-
-timeOffset=serverTime-localTime;
-
-});
-
-}
+};
 
 
 /* BPMスライダー */
 
-const bpmSlider=document.getElementById("bpmSlider");
-
-bpmSlider.oninput=async(e)=>{
+document.getElementById("bpmSlider").oninput=async(e)=>{
 
 bpm=e.target.value;
 
-document.getElementById("bpmDisplay").innerText=bpm+" BPM";
+document.getElementById("bpmDisplay")
+.innerText=bpm+" BPM";
 
 await updateDoc(roomRef,{bpm:bpm});
 
@@ -214,6 +333,28 @@ await updateDoc(roomRef,{youtube:url});
 
 };
 
+
+/* サーバー時刻同期 */
+
+async function syncServerTime(){
+
+const refDoc=doc(db,"rooms","timeSync");
+
+await setDoc(refDoc,{now:serverTimestamp()});
+
+onSnapshot(refDoc,(snap)=>{
+
+if(!snap.data())return;
+
+const serverTime=snap.data().now.toMillis();
+
+const localTime=Date.now();
+
+timeOffset=serverTime-localTime;
+
+});
+
+}
 
 
 /* メトロノーム */
@@ -285,7 +426,6 @@ clearInterval(clickInterval);
 };
 
 
-
 /* ルーム監視 */
 
 onSnapshot(roomRef,async(snap)=>{
@@ -294,23 +434,15 @@ const data=snap.data();
 
 if(!data)return;
 
-
-
-/* BPM同期 */
-
 if(data.bpm){
 
 bpm=data.bpm;
 
-document.getElementById("bpmSlider").value=bpm;
-
-document.getElementById("bpmDisplay").innerText=bpm+" BPM";
+document.getElementById("bpmDisplay")
+.innerText=bpm+" BPM";
 
 }
 
-
-
-/* MP3ロード */
 
 if(data.audioURL && !buffer){
 
@@ -323,26 +455,23 @@ buffer=await audioContext.decodeAudioData(arr);
 }
 
 
-
-/* YouTube表示 */
-
 if(data.youtube){
 
 const id=data.youtube.split("v=")[1];
 
-document.getElementById("youtubePlayer").innerHTML=
+document.getElementById("youtubePlayer")
+.innerHTML=
 
 `<iframe width="300" height="170"
-src="https://www.youtube.com/embed/${id}"
+src="https://www.youtube.com/embed/${id}?autoplay=0"
 allow="autoplay"></iframe>`;
 
 }
 
 
-
-/* 再生 */
-
 if(data.isPlaying){
+
+document.getElementById("playLED").classList.add("on");
 
 const delay=(data.startAt-Date.now()-timeOffset)/1000;
 
@@ -360,15 +489,40 @@ source.start(audioContext.currentTime+delay);
 
 startMetronome(audioContext.currentTime+delay);
 
+}else{
+
+document.getElementById("playLED").classList.remove("on");
+
 }
-
-
 
 });
 
 
+/* VUメーター */
 
-/* 定期再同期（ズレ防止） */
+function drawVU(){
+
+const data=new Uint8Array(analyser.frequencyBinCount);
+
+analyser.getByteFrequencyData(data);
+
+let sum=0;
+
+for(let i=0;i<data.length;i++)sum+=data[i];
+
+let avg=sum/data.length;
+
+document.getElementById("vuBar")
+.style.width=(avg/255*100)+"%";
+
+requestAnimationFrame(drawVU);
+
+}
+
+drawVU();
+
+
+/* 定期再同期 */
 
 setInterval(syncServerTime,10000);
 
