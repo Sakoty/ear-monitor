@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Band Sync Monitor</title>
+<title>Band Monitor</title>
 
 <style>
 
@@ -11,30 +11,21 @@ background:#070707;
 color:#00ff9c;
 font-family:monospace;
 text-align:center;
-margin:0;
 }
-
-/* パネル */
-
-.panel{
-padding:20px;
-}
-
-/* BPM表示 */
 
 #bpmDisplay{
 font-size:70px;
 text-shadow:0 0 20px #00ff9c;
-margin-top:20px;
 }
 
-/* スライダー */
+#countDisplay{
+font-size:40px;
+margin-top:10px;
+}
 
 .slider{
 width:80%;
 }
-
-/* ボタン */
 
 button{
 background:#111;
@@ -42,68 +33,10 @@ border:2px solid #00ff9c;
 color:#00ff9c;
 padding:12px 30px;
 margin:10px;
-font-size:16px;
-border-radius:8px;
-}
-
-button:hover{
-background:#00ff9c;
-color:black;
-}
-
-/* LED */
-
-.led{
-width:15px;
-height:15px;
-border-radius:50%;
-display:inline-block;
-margin-left:10px;
-background:#111;
-box-shadow:0 0 10px #000;
-}
-
-.led.on{
-background:#ff0033;
-box-shadow:0 0 20px #ff0033;
-}
-
-/* フェーダー */
-
-.faderContainer{
-margin-top:30px;
 }
 
 .fader{
-writing-mode: bt-lr;
--webkit-appearance: slider-vertical;
-width:30px;
 height:200px;
-}
-
-/* VUメーター */
-
-.vu{
-width:200px;
-height:15px;
-background:#222;
-margin:auto;
-border-radius:5px;
-overflow:hidden;
-}
-
-.vuBar{
-height:100%;
-width:0%;
-background:#00ff9c;
-box-shadow:0 0 10px #00ff9c;
-}
-
-/* 接続人数 */
-
-#memberCount{
-font-size:20px;
-margin-top:10px;
 }
 
 </style>
@@ -111,15 +44,13 @@ margin-top:10px;
 
 <body>
 
-<div class="panel">
-
 <h2>BAND MONITOR</h2>
 
-<div id="memberCount">接続人数: 0</div>
-
 <div id="bpmDisplay">120 BPM</div>
+<div id="countDisplay">1</div>
 
-<input type="range"
+<input
+type="range"
 id="bpmSlider"
 class="slider"
 min="60"
@@ -132,45 +63,24 @@ value="120">
 <button id="startBtn">START</button>
 <button id="stopBtn">STOP</button>
 
-<span class="led" id="playLED"></span>
-
 <br><br>
-
-<h3>MP3共有</h3>
 
 <input type="file" id="audioUpload">
 
-<h3>YouTube共有</h3>
-
-<input type="text"
-id="youtubeURL"
-placeholder="YouTube URL">
-
-<button id="setYoutube">共有</button>
-
 <br><br>
 
-<div id="youtubePlayer"></div>
+音量
 
-<div class="faderContainer">
+<br>
 
-<p>自分の音量</p>
-
-<input type="range"
+<input
+type="range"
 min="0"
 max="1"
 step="0.01"
 value="1"
 id="volumeFader"
 class="fader">
-
-</div>
-
-<div class="vu">
-<div class="vuBar" id="vuBar"></div>
-</div>
-
-</div>
 
 <script type="module">
 
@@ -180,12 +90,10 @@ from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import {
 getFirestore,
 doc,
-setDoc,
 updateDoc,
 onSnapshot,
-serverTimestamp,
-collection,
-deleteDoc
+setDoc,
+serverTimestamp
 }
 from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
@@ -202,105 +110,62 @@ const firebaseConfig={
 
 };
 
-
 const app=initializeApp(firebaseConfig);
-
 const db=getFirestore(app);
-
 const storage=getStorage(app);
 
-const roomId="bandroom";
-
-const roomRef=doc(db,"rooms",roomId);
-
-const membersRef=collection(db,"rooms",roomId,"members");
-
-const memberId=Math.random().toString(36).substring(2,9);
-
-
-/* 接続登録 */
-
-await setDoc(doc(membersRef,memberId),{
-
-joined:Date.now()
-
-});
-
-
-window.addEventListener("beforeunload",()=>{
-
-deleteDoc(doc(membersRef,memberId))
-
-});
-
-
-/* 接続人数監視 */
-
-onSnapshot(membersRef,(snap)=>{
-
-document.getElementById("memberCount")
-.innerText="接続人数: "+snap.size
-
-});
-
+const roomRef=doc(db,"rooms","bandroom");
 
 let audioContext;
-
 let gainNode;
 
-let analyser;
-
 let buffer;
-
 let source;
 
 let bpm=120;
 
 let timeOffset=0;
 
-let nextClickTime;
-
-let clickInterval;
+let beat=1;
 
 
-/* 音声有効化 */
+/* Audio ON */
 
 document.getElementById("enableAudio").onclick=async()=>{
 
 audioContext=new(window.AudioContext||window.webkitAudioContext)();
 
+await audioContext.resume();
+
 gainNode=audioContext.createGain();
 
-analyser=audioContext.createAnalyser();
-
-gainNode.connect(analyser);
-
-analyser.connect(audioContext.destination);
+gainNode.connect(audioContext.destination);
 
 await syncServerTime();
 
 };
 
 
-/* 個人音量フェーダー */
+/* BPMスライダー */
 
-document.getElementById("volumeFader").oninput=(e)=>{
+const bpmSlider=document.getElementById("bpmSlider");
 
-gainNode.gain.value=e.target.value;
+bpmSlider.oninput=(e)=>{
+
+bpm=e.target.value;
+
+document.getElementById("bpmDisplay").innerText=bpm+" BPM";
+
+updateDoc(roomRef,{bpm:bpm});
 
 };
 
 
-/* BPMスライダー */
+/* 音量 */
 
-document.getElementById("bpmSlider").oninput=async(e)=>{
+document.getElementById("volumeFader").oninput=(e)=>{
 
-bpm=e.target.value;
-
-document.getElementById("bpmDisplay")
-.innerText=bpm+" BPM";
-
-await updateDoc(roomRef,{bpm:bpm});
+if(gainNode)gainNode.gain.value=e.target.value;
 
 };
 
@@ -323,17 +188,6 @@ await updateDoc(roomRef,{audioURL:url});
 });
 
 
-/* YouTube共有 */
-
-document.getElementById("setYoutube").onclick=async()=>{
-
-const url=document.getElementById("youtubeURL").value;
-
-await updateDoc(roomRef,{youtube:url});
-
-};
-
-
 /* サーバー時刻同期 */
 
 async function syncServerTime(){
@@ -348,9 +202,7 @@ if(!snap.data())return;
 
 const serverTime=snap.data().now.toMillis();
 
-const localTime=Date.now();
-
-timeOffset=serverTime-localTime;
+timeOffset=serverTime-Date.now();
 
 });
 
@@ -361,19 +213,27 @@ timeOffset=serverTime-localTime;
 
 function startMetronome(startTime){
 
-const interval=60/bpm;
+let interval=60/bpm;
 
-nextClickTime=startTime;
+let next=startTime;
 
-clickInterval=setInterval(()=>{
+setInterval(()=>{
 
-while(nextClickTime<audioContext.currentTime+0.1){
+while(next<audioContext.currentTime+0.1){
 
 const osc=audioContext.createOscillator();
 
 const gain=audioContext.createGain();
 
+if(beat==1){
+
+osc.frequency.value=1500;
+
+}else{
+
 osc.frequency.value=1000;
+
+}
 
 gain.gain.value=0.7;
 
@@ -381,11 +241,17 @@ osc.connect(gain);
 
 gain.connect(gainNode);
 
-osc.start(nextClickTime);
+osc.start(next);
 
-osc.stop(nextClickTime+0.05);
+osc.stop(next+0.05);
 
-nextClickTime+=interval;
+document.getElementById("countDisplay").innerText=beat;
+
+beat++;
+
+if(beat>4)beat=1;
+
+next+=interval;
 
 }
 
@@ -403,9 +269,7 @@ const startAt=Date.now()+timeOffset+5000;
 await updateDoc(roomRef,{
 
 isPlaying:true,
-
 startAt:startAt,
-
 updatedAt:serverTimestamp()
 
 });
@@ -421,12 +285,10 @@ await updateDoc(roomRef,{isPlaying:false});
 
 if(source)source.stop();
 
-clearInterval(clickInterval);
-
 };
 
 
-/* ルーム監視 */
+/* Firestore監視 */
 
 onSnapshot(roomRef,async(snap)=>{
 
@@ -434,15 +296,21 @@ const data=snap.data();
 
 if(!data)return;
 
+
+/* BPM同期 */
+
 if(data.bpm){
 
 bpm=data.bpm;
 
-document.getElementById("bpmDisplay")
-.innerText=bpm+" BPM";
+document.getElementById("bpmSlider").value=bpm;
+
+document.getElementById("bpmDisplay").innerText=bpm+" BPM";
 
 }
 
+
+/* 音源読み込み */
 
 if(data.audioURL && !buffer){
 
@@ -455,23 +323,11 @@ buffer=await audioContext.decodeAudioData(arr);
 }
 
 
-if(data.youtube){
-
-const id=data.youtube.split("v=")[1];
-
-document.getElementById("youtubePlayer")
-.innerHTML=
-
-`<iframe width="300" height="170"
-src="https://www.youtube.com/embed/${id}?autoplay=0"
-allow="autoplay"></iframe>`;
-
-}
-
+/* 再生 */
 
 if(data.isPlaying){
 
-document.getElementById("playLED").classList.add("on");
+if(!audioContext)return;
 
 const delay=(data.startAt-Date.now()-timeOffset)/1000;
 
@@ -489,42 +345,10 @@ source.start(audioContext.currentTime+delay);
 
 startMetronome(audioContext.currentTime+delay);
 
-}else{
-
-document.getElementById("playLED").classList.remove("on");
-
 }
 
 });
 
-
-/* VUメーター */
-
-function drawVU(){
-
-const data=new Uint8Array(analyser.frequencyBinCount);
-
-analyser.getByteFrequencyData(data);
-
-let sum=0;
-
-for(let i=0;i<data.length;i++)sum+=data[i];
-
-let avg=sum/data.length;
-
-document.getElementById("vuBar")
-.style.width=(avg/255*100)+"%";
-
-requestAnimationFrame(drawVU);
-
-}
-
-drawVU();
-
-
-/* 定期再同期 */
-
-setInterval(syncServerTime,10000);
 
 </script>
 
