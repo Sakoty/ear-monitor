@@ -67,6 +67,26 @@ width:80%;
 margin:20px 0;
 }
 
+.player{
+margin-top:30px;
+border-top:1px solid #00ff99;
+padding-top:20px;
+}
+
+input{
+padding:10px;
+width:60%;
+margin:10px;
+background:#000;
+border:1px solid #00ff99;
+color:#00ff99;
+}
+
+iframe{
+margin-top:15px;
+border:none;
+}
+
 </style>
 </head>
 <body>
@@ -75,8 +95,7 @@ margin:20px 0;
 
 <div class="bpm" id="bpmDisplay">120</div>
 
-<button id="bpmDown">−</button>
-<button id="bpmUp">＋</button>
+<input type="range" id="tempoSlider" class="slider" min="40" max="240" value="120">
 
 <div class="count" id="countdown"></div>
 
@@ -90,7 +109,26 @@ margin:20px 0;
 
 <br>
 
+<label>個人音量</label>
 <input type="range" id="volume" class="slider" min="0" max="1" step="0.01" value="1">
+
+<div class="player">
+
+<h3>共有音源</h3>
+
+<input type="text" id="youtubeURL" placeholder="YouTube URL">
+<button id="shareYT">YouTube共有</button>
+
+<br>
+
+<input type="file" id="mp3File" accept="audio/*">
+<button id="shareMP3">MP3共有</button>
+
+<div id="youtubePlayer"></div>
+
+<audio id="sharedAudio" controls></audio>
+
+</div>
 
 <script type="module">
 
@@ -140,14 +178,16 @@ document.getElementById("volume").oninput=e=>{
 if(gainNode)gainNode.gain.value=e.target.value;
 };
 
-document.getElementById("bpmUp").onclick=()=>{
-currentBpm++;
-update(roomRef,{bpm:currentBpm});
-};
+const tempoSlider=document.getElementById("tempoSlider");
 
-document.getElementById("bpmDown").onclick=()=>{
-if(currentBpm>30)currentBpm--;
+tempoSlider.oninput=e=>{
+
+currentBpm=parseInt(e.target.value);
+
+document.getElementById("bpmDisplay").textContent=currentBpm;
+
 update(roomRef,{bpm:currentBpm});
+
 };
 
 document.getElementById("startBtn").onclick=()=>{
@@ -171,13 +211,9 @@ function stopAll(){
 
 running=false;
 
-if(startTimeout)clearTimeout(startTimeout);
-if(intervalTimer)clearInterval(intervalTimer);
-if(countTimer)clearInterval(countTimer);
-
-startTimeout=null;
-intervalTimer=null;
-countTimer=null;
+clearTimeout(startTimeout);
+clearInterval(intervalTimer);
+clearInterval(countTimer);
 
 document.getElementById("countdown").textContent="";
 
@@ -201,7 +237,7 @@ document.getElementById("countdown").textContent=count;
 
 countTimer=setInterval(()=>{
 
-playClick(true);
+playClick();
 
 flashLed();
 
@@ -229,8 +265,7 @@ function startMetronome(){
 
 intervalTimer=setInterval(()=>{
 
-playClick(true);
-
+playClick();
 flashLed();
 
 },interval);
@@ -242,10 +277,6 @@ flashLed();
 function playClick(){
 
 if(!audioContext)return;
-
-if(audioContext.state==="suspended"){
-audioContext.resume();
-}
 
 const osc=audioContext.createOscillator();
 const gain=audioContext.createGain();
@@ -273,23 +304,67 @@ led.classList.remove("on");
 
 }
 
+document.getElementById("shareYT").onclick=()=>{
+
+const url=document.getElementById("youtubeURL").value;
+
+update(roomRef,{
+youtube:url
+});
+
+};
+
+document.getElementById("shareMP3").onclick=()=>{
+
+const file=document.getElementById("mp3File").files[0];
+
+const reader=new FileReader();
+
+reader.onload=e=>{
+
+update(roomRef,{
+mp3:e.target.result
+});
+
+};
+
+reader.readAsDataURL(file);
+
+};
+
 onValue(roomRef,(snap)=>{
 
 const data=snap.val();
+
 if(!data)return;
 
 currentBpm=data.bpm||120;
-document.getElementById("bpmDisplay").textContent=currentBpm;
 
-if(!audioContext)return;
+document.getElementById("bpmDisplay").textContent=currentBpm;
+tempoSlider.value=currentBpm;
 
 if(data.isPlaying){
-
 startSequence(currentBpm,data.startAt);
-
 }else{
-
 stopAll();
+}
+
+if(data.youtube){
+
+const id=data.youtube.split("v=")[1];
+
+document.getElementById("youtubePlayer").innerHTML=
+`<iframe width="300" height="170"
+src="https://www.youtube-nocookie.com/embed/${id}"
+allowfullscreen></iframe>`;
+
+}
+
+if(data.mp3){
+
+const audio=document.getElementById("sharedAudio");
+
+audio.src=data.mp3;
 
 }
 
