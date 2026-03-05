@@ -53,6 +53,7 @@ button:active{
 <header>ROOM: bandroom1</header>
 
 <div class="bpm" id="bpmDisplay">120</div>
+<div id="countdown" style="font-size:80px; margin-top:20px;"></div>
 <div class="countdown" id="countdown"></div>
 
 <button id="bpmDown">−</button>
@@ -160,23 +161,45 @@ function scheduleClick(bpm, targetTime){
   const intervalMs = (60 / bpm) * 1000;
   let beat = 0;
 
-  const delay = targetTime - Date.now();
+  const delay = targetTime - Date.now(); // 4秒
 
-  setTimeout(()=>{
+  /* まず4カウント表示だけ */
+  startTimeout = setTimeout(()=>{
 
     if(!isClicking) return;
 
-    const timer = setInterval(()=>{
+    let count = 4;
+
+    const countTimer = setInterval(()=>{
+
+      document.getElementById("countdown").textContent = count;
+
+      count--;
+
+      if(count === 0){
+        clearInterval(countTimer);
+        document.getElementById("countdown").textContent = "";
+
+        startMetronome();
+      }
+
+    }, intervalMs);
+
+  }, delay);
+
+  /* メトロノーム開始 */
+  function startMetronome(){
+
+    intervalTimer = setInterval(()=>{
 
       if(!isClicking){
-        clearInterval(timer);
+        clearInterval(intervalTimer);
         return;
       }
 
       const osc = audioContext.createOscillator();
       const g = audioContext.createGain();
 
-      // 1拍目だけ高音
       osc.frequency.value = (beat % 4 === 0) ? 1500 : 1000;
       g.gain.value = 0.4;
 
@@ -189,10 +212,8 @@ function scheduleClick(bpm, targetTime){
       beat++;
 
     }, intervalMs);
-
-  }, delay);
+  }
 }
-
 /* データ監視 */
 onValue(roomRef,(snapshot)=>{
   const data = snapshot.val();
