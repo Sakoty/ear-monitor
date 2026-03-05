@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -101,10 +101,6 @@ iframe{
 margin-top:15px;
 }
 
-.latency{
-margin-top:20px;
-}
-
 </style>
 </head>
 <body>
@@ -129,13 +125,6 @@ margin-top:20px;
 <div class="led" id="tempoLed"></div>
 
 <div class="controls">
-
-<button id="enableAudio">AUDIO</button>
-<button id="startBtn">START</button>
-<button id="stopBtn">STOP</button>
-
-</div>
-
 <div class="latency">
 
 <button id="measureLatency">Bluetooth遅延測定</button>
@@ -145,6 +134,11 @@ margin-top:20px;
 <input type="range" id="latencySlider" min="-300" max="300" value="0">
 <span id="latencyValue">0</span>
 </div>
+
+</div>
+<button id="enableAudio">AUDIO</button>
+<button id="startBtn">START</button>
+<button id="stopBtn">STOP</button>
 
 </div>
 
@@ -209,11 +203,13 @@ const usersRef=ref(db,"rooms/"+room+"/users");
 const userId=Math.random().toString(36).substr(2,9);
 
 set(ref(db,"rooms/"+room+"/users/"+userId),true);
+
 onDisconnect(ref(db,"rooms/"+room+"/users/"+userId)).remove();
 
 onValue(usersRef,(snap)=>{
 
 const data=snap.val();
+
 if(!data)return;
 
 document.getElementById("users").textContent=Object.keys(data).length;
@@ -225,8 +221,6 @@ let clickGain;
 let musicGain;
 let masterGain;
 
-let latencyOffset=0;
-
 let currentBpm=120;
 
 let nextNoteTime=0;
@@ -236,7 +230,7 @@ let lookahead=25;
 let scheduleAhead=0.1;
 
 let secondsPerBeat=0.5;
-
+let latencyOffset=0;
 document.getElementById("enableAudio").onclick=async()=>{
 
 audioContext=new(window.AudioContext||window.webkitAudioContext)();
@@ -252,15 +246,21 @@ masterGain.connect(audioContext.destination);
 };
 
 document.getElementById("clickVolume").oninput=e=>{
+
 clickGain.gain.value=e.target.value;
+
 };
 
 document.getElementById("musicVolume").oninput=e=>{
+
 musicGain.gain.value=e.target.value;
+
 };
 
 document.getElementById("masterVolume").oninput=e=>{
+
 masterGain.gain.value=e.target.value;
+
 };
 
 const tempoSlider=document.getElementById("tempoSlider");
@@ -268,12 +268,153 @@ const tempoSlider=document.getElementById("tempoSlider");
 tempoSlider.oninput=e=>{
 
 currentBpm=parseInt(e.target.value);
+
 document.getElementById("bpmDisplay").textContent=currentBpm;
 
 update(roomRef,{bpm:currentBpm});
 
 };
 
+document.getElementById("startBtn").onclick=()=>{
+
+const startTime=Date.now()+2000;
+
+update(roomRef,{
+startAt:startTime,
+bpm:currentBpm,
+playing:true
+});
+
+};
+
+document.getElementById("stopBtn").onclick=()=>{
+
+update(roomRef,{playing:false});
+
+stopMetronome();
+
+};
+
+function scheduler(){
+
+while(nextNoteTime<audioContext.currentTime+scheduleAhead){
+
+playClick(nextNoteTime+latencyOffset);
+
+flash();
+
+nextNoteTime+=secondsPerBeat;
+
+}
+
+}
+
+function playClick(time){
+
+const osc=audioContext.createOscillator();
+const gain=audioContext.createGain();
+
+osc.frequency.value=1500;
+
+gain.gain.value=0.6;
+
+osc.connect(gain);
+gain.connect(clickGain);
+
+osc.start(time);
+osc.stop(time+0.05);
+
+}
+
+function startMetronome(){
+
+secondsPerBeat=60/currentBpm;
+
+nextNoteTime=audioContext.currentTime;
+
+schedulerTimer=setInterval(scheduler,lookahead);
+
+}
+
+function stopMetronome(){
+
+clearInterval(schedulerTimer);
+
+}
+
+function flash(){
+
+const led=document.getElementById("tempoLed");
+
+led.classList.add("on");
+
+setTimeout(()=>led.classList.remove("on"),100);
+
+}
+
+document.getElementById("shareYT").onclick=()=>{
+
+const url=document.getElementById("youtubeURL").value;
+
+update(roomRef,{youtube:url});
+
+};
+
+document.getElementById("shareMP3").onclick=()=>{
+
+const file=document.getElementById("mp3File").files[0];
+
+const reader=new FileReader();
+
+reader.onload=e=>{
+
+update(roomRef,{mp3:e.target.result});
+
+};
+
+reader.readAsDataURL(file);
+
+};
+
+onValue(roomRef,(snap)=>{
+
+const data=snap.val();
+
+if(!data)return;
+
+currentBpm=data.bpm||120;
+
+document.getElementById("bpmDisplay").textContent=currentBpm;
+tempoSlider.value=currentBpm;
+
+if(data.playing){
+
+startMetronome();
+
+}else{
+
+stopMetronome();
+
+}
+
+if(data.youtube){
+
+const id=data.youtube.split("v=")[1];
+
+document.getElementById("youtubePlayer").innerHTML=
+`<iframe width="300" height="170"
+src="https://www.youtube-nocookie.com/embed/${id}"
+allowfullscreen></iframe>`;
+
+}
+
+if(data.mp3){
+
+document.getElementById("audioPlayer").src=data.mp3;
+
+}
+
+});
 document.getElementById("measureLatency").onclick=()=>{
 
 if(!audioContext)return;
@@ -308,80 +449,10 @@ document.getElementById("latencyValue").textContent=Math.round(latency);
 document.getElementById("latencySlider").oninput=e=>{
 
 latencyOffset=e.target.value/1000;
+
 document.getElementById("latencyValue").textContent=e.target.value;
 
 };
-
-document.getElementById("startBtn").onclick=()=>{
-
-const startTime=Date.now()+2000;
-
-update(roomRef,{
-startAt:startTime,
-bpm:currentBpm,
-playing:true
-});
-
-};
-
-document.getElementById("stopBtn").onclick=()=>{
-
-update(roomRef,{playing:false});
-stopMetronome();
-
-};
-
-function scheduler(){
-
-while(nextNoteTime<audioContext.currentTime+scheduleAhead){
-
-playClick(nextNoteTime+latencyOffset);
-flash();
-
-nextNoteTime+=secondsPerBeat;
-
-}
-
-}
-
-function playClick(time){
-
-const osc=audioContext.createOscillator();
-const gain=audioContext.createGain();
-
-osc.frequency.value=1500;
-gain.gain.value=0.6;
-
-osc.connect(gain);
-gain.connect(clickGain);
-
-osc.start(time);
-osc.stop(time+0.05);
-
-}
-
-function startMetronome(){
-
-secondsPerBeat=60/currentBpm;
-nextNoteTime=audioContext.currentTime;
-
-schedulerTimer=setInterval(scheduler,lookahead);
-
-}
-
-function stopMetronome(){
-clearInterval(schedulerTimer);
-}
-
-function flash(){
-
-const led=document.getElementById("tempoLed");
-
-led.classList.add("on");
-setTimeout(()=>led.classList.remove("on"),100);
-
-}
-
 </script>
 
 </body>
