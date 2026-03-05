@@ -2,353 +2,298 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Band Monitor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Sync Monitor</title>
 
 <style>
 
 body{
-background:#070707;
-color:#00ff9c;
+margin:0;
+background:#0b0b0f;
+color:#00ff99;
 font-family:monospace;
 text-align:center;
 }
 
-#bpmDisplay{
+header{
+padding:15px;
+font-size:20px;
+border-bottom:1px solid #00ff99;
+}
+
+.bpm{
 font-size:70px;
-text-shadow:0 0 20px #00ff9c;
+text-shadow:0 0 20px #00ff99;
+margin:20px 0;
 }
 
-#countDisplay{
-font-size:40px;
-margin-top:10px;
+.count{
+font-size:90px;
+height:100px;
 }
 
-.slider{
-width:80%;
+.led{
+width:20px;
+height:20px;
+border-radius:50%;
+display:inline-block;
+background:#111;
+box-shadow:0 0 10px #000;
+margin:10px;
+}
+
+.led.on{
+background:#ff0033;
+box-shadow:0 0 20px #ff0033;
 }
 
 button{
 background:#111;
-border:2px solid #00ff9c;
-color:#00ff9c;
-padding:12px 30px;
+border:2px solid #00ff99;
+color:#00ff99;
+padding:15px 30px;
 margin:10px;
+font-size:18px;
+border-radius:8px;
 }
 
-.fader{
-height:200px;
+button:active{
+background:#00ff99;
+color:#000;
+}
+
+.slider{
+width:80%;
+margin:20px 0;
 }
 
 </style>
 </head>
-
 <body>
 
-<h2>BAND MONITOR</h2>
+<header>ROOM : bandroom1</header>
 
-<div id="bpmDisplay">120 BPM</div>
-<div id="countDisplay">1</div>
+<div class="bpm" id="bpmDisplay">120</div>
 
-<input
-type="range"
-id="bpmSlider"
-class="slider"
-min="60"
-max="200"
-value="120">
+<button id="bpmDown">−</button>
+<button id="bpmUp">＋</button>
+
+<div class="count" id="countdown"></div>
+
+<div class="led" id="tempoLed"></div>
 
 <br>
 
-<button id="enableAudio">Audio ON</button>
+<button id="enableAudio">音声有効化</button>
 <button id="startBtn">START</button>
 <button id="stopBtn">STOP</button>
 
-<br><br>
-
-<input type="file" id="audioUpload">
-
-<br><br>
-
-音量
-
 <br>
 
-<input
-type="range"
-min="0"
-max="1"
-step="0.01"
-value="1"
-id="volumeFader"
-class="fader">
+<input type="range" id="volume" class="slider" min="0" max="1" step="0.01" value="1">
 
 <script type="module">
 
-import { initializeApp }
-from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-
-import {
-getFirestore,
-doc,
-updateDoc,
-onSnapshot,
-setDoc,
-serverTimestamp
-}
-from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-import {
-getStorage,
-ref,
-uploadBytes,
-getDownloadURL
-}
-from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
-
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import { getDatabase, ref, onValue, update }
+from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
 const firebaseConfig={
-
+apiKey:"AIzaSyAqx-jpLl3Q30iTrHA5YPWJRMI9-abm1Pg",
+authDomain:"earmonitor.firebaseapp.com",
+databaseURL:"https://earmonitor-default-rtdb.firebaseio.com/",
+projectId:"earmonitor",
+storageBucket:"earmonitor.firebasestorage.app",
+messagingSenderId:"504316277047",
+appId:"1:504316277047:web:117cbb8f831dc8ba81eab2"
 };
 
 const app=initializeApp(firebaseConfig);
-const db=getFirestore(app);
-const storage=getStorage(app);
+const db=getDatabase(app);
 
-const roomRef=doc(db,"rooms","bandroom");
+const roomRef=ref(db,"rooms/bandroom1");
 
 let audioContext;
 let gainNode;
 
-let buffer;
-let source;
+let currentBpm=120;
 
-let bpm=120;
+let startTimeout=null;
+let intervalTimer=null;
+let countTimer=null;
 
-let timeOffset=0;
-
-let beat=1;
-
-
-/* Audio ON */
+let running=false;
 
 document.getElementById("enableAudio").onclick=async()=>{
 
 audioContext=new(window.AudioContext||window.webkitAudioContext)();
 
-await audioContext.resume();
-
 gainNode=audioContext.createGain();
-
+gainNode.gain.value=1;
 gainNode.connect(audioContext.destination);
 
-await syncServerTime();
+await audioContext.resume();
 
 };
 
-
-/* BPMスライダー */
-
-const bpmSlider=document.getElementById("bpmSlider");
-
-bpmSlider.oninput=(e)=>{
-
-bpm=e.target.value;
-
-document.getElementById("bpmDisplay").innerText=bpm+" BPM";
-
-updateDoc(roomRef,{bpm:bpm});
-
-};
-
-
-/* 音量 */
-
-document.getElementById("volumeFader").oninput=(e)=>{
-
+document.getElementById("volume").oninput=e=>{
 if(gainNode)gainNode.gain.value=e.target.value;
+};
+
+document.getElementById("bpmUp").onclick=()=>{
+currentBpm++;
+update(roomRef,{bpm:currentBpm});
+};
+
+document.getElementById("bpmDown").onclick=()=>{
+if(currentBpm>30)currentBpm--;
+update(roomRef,{bpm:currentBpm});
+};
+
+document.getElementById("startBtn").onclick=()=>{
+
+const startTime=Date.now()+2000;
+
+update(roomRef,{
+isPlaying:true,
+bpm:currentBpm,
+startAt:startTime
+});
 
 };
 
+document.getElementById("stopBtn").onclick=()=>{
+update(roomRef,{isPlaying:false});
+stopAll();
+};
 
-/* MP3アップロード */
+function stopAll(){
 
-document.getElementById("audioUpload")
-.addEventListener("change",async(e)=>{
+running=false;
 
-const file=e.target.files[0];
+if(startTimeout)clearTimeout(startTimeout);
+if(intervalTimer)clearInterval(intervalTimer);
+if(countTimer)clearInterval(countTimer);
 
-const storageRef=ref(storage,"audio/"+file.name);
+startTimeout=null;
+intervalTimer=null;
+countTimer=null;
 
-await uploadBytes(storageRef,file);
-
-const url=await getDownloadURL(storageRef);
-
-await updateDoc(roomRef,{audioURL:url});
-
-});
-
-
-/* サーバー時刻同期 */
-
-async function syncServerTime(){
-
-const refDoc=doc(db,"rooms","timeSync");
-
-await setDoc(refDoc,{now:serverTimestamp()});
-
-onSnapshot(refDoc,(snap)=>{
-
-if(!snap.data())return;
-
-const serverTime=snap.data().now.toMillis();
-
-timeOffset=serverTime-Date.now();
-
-});
+document.getElementById("countdown").textContent="";
 
 }
 
+function startSequence(bpm,startAt){
 
-/* メトロノーム */
+if(running)return;
 
-function startMetronome(startTime){
+running=true;
 
-let interval=60/bpm;
+const interval=(60/bpm)*1000;
 
-let next=startTime;
+const delay=startAt-Date.now();
 
-setInterval(()=>{
+startTimeout=setTimeout(()=>{
 
-while(next<audioContext.currentTime+0.1){
+let count=4;
 
-const osc=audioContext.createOscillator();
+document.getElementById("countdown").textContent=count;
 
-const gain=audioContext.createGain();
+countTimer=setInterval(()=>{
 
-if(beat==1){
+playClick(true);
 
-osc.frequency.value=1500;
+flashLed();
+
+count--;
+
+if(count>0){
+
+document.getElementById("countdown").textContent=count;
 
 }else{
 
-osc.frequency.value=1000;
+clearInterval(countTimer);
+
+document.getElementById("countdown").textContent="";
+
+startMetronome();
 
 }
 
-gain.gain.value=0.7;
+},interval);
 
-osc.connect(gain);
+},delay);
 
-gain.connect(gainNode);
+function startMetronome(){
 
-osc.start(next);
+intervalTimer=setInterval(()=>{
 
-osc.stop(next+0.05);
+playClick(true);
 
-document.getElementById("countDisplay").innerText=beat;
+flashLed();
 
-beat++;
-
-if(beat>4)beat=1;
-
-next+=interval;
+},interval);
 
 }
 
-},25);
-
 }
 
-
-/* START */
-
-document.getElementById("startBtn").onclick=async()=>{
-
-const startAt=Date.now()+timeOffset+5000;
-
-await updateDoc(roomRef,{
-
-isPlaying:true,
-startAt:startAt,
-updatedAt:serverTimestamp()
-
-});
-
-};
-
-
-/* STOP */
-
-document.getElementById("stopBtn").onclick=async()=>{
-
-await updateDoc(roomRef,{isPlaying:false});
-
-if(source)source.stop();
-
-};
-
-
-/* Firestore監視 */
-
-onSnapshot(roomRef,async(snap)=>{
-
-const data=snap.data();
-
-if(!data)return;
-
-
-/* BPM同期 */
-
-if(data.bpm){
-
-bpm=data.bpm;
-
-document.getElementById("bpmSlider").value=bpm;
-
-document.getElementById("bpmDisplay").innerText=bpm+" BPM";
-
-}
-
-
-/* 音源読み込み */
-
-if(data.audioURL && !buffer){
-
-const res=await fetch(data.audioURL);
-
-const arr=await res.arrayBuffer();
-
-buffer=await audioContext.decodeAudioData(arr);
-
-}
-
-
-/* 再生 */
-
-if(data.isPlaying){
+function playClick(){
 
 if(!audioContext)return;
 
-const delay=(data.startAt-Date.now()-timeOffset)/1000;
+if(audioContext.state==="suspended"){
+audioContext.resume();
+}
 
-if(buffer){
+const osc=audioContext.createOscillator();
+const gain=audioContext.createGain();
 
-source=audioContext.createBufferSource();
+osc.frequency.value=1600;
+gain.gain.value=0.4;
 
-source.buffer=buffer;
+osc.connect(gain);
+gain.connect(gainNode);
 
-source.connect(gainNode);
-
-source.start(audioContext.currentTime+delay);
+osc.start();
+osc.stop(audioContext.currentTime+0.05);
 
 }
 
-startMetronome(audioContext.currentTime+delay);
+function flashLed(){
+
+const led=document.getElementById("tempoLed");
+
+led.classList.add("on");
+
+setTimeout(()=>{
+led.classList.remove("on");
+},100);
+
+}
+
+onValue(roomRef,(snap)=>{
+
+const data=snap.val();
+if(!data)return;
+
+currentBpm=data.bpm||120;
+document.getElementById("bpmDisplay").textContent=currentBpm;
+
+if(!audioContext)return;
+
+if(data.isPlaying){
+
+startSequence(currentBpm,data.startAt);
+
+}else{
+
+stopAll();
 
 }
 
 });
-
 
 </script>
 
