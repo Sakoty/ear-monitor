@@ -101,6 +101,10 @@ iframe{
 margin-top:15px;
 }
 
+.latency{
+margin-top:20px;
+}
+
 </style>
 </head>
 <body>
@@ -132,7 +136,7 @@ margin-top:15px;
 
 </div>
 
-<div style="margin-top:20px">
+<div class="latency">
 
 <button id="measureLatency">Bluetooth遅延測定</button>
 
@@ -221,6 +225,8 @@ let clickGain;
 let musicGain;
 let masterGain;
 
+let latencyOffset=0;
+
 let currentBpm=120;
 
 let nextNoteTime=0;
@@ -230,8 +236,6 @@ let lookahead=25;
 let scheduleAhead=0.1;
 
 let secondsPerBeat=0.5;
-
-let latencyOffset=0;
 
 document.getElementById("enableAudio").onclick=async()=>{
 
@@ -272,11 +276,13 @@ update(roomRef,{bpm:currentBpm});
 
 document.getElementById("measureLatency").onclick=()=>{
 
+if(!audioContext)return;
+
 const osc=audioContext.createOscillator();
 const gain=audioContext.createGain();
 
-osc.frequency.value=1200;
-gain.gain.value=0.7;
+osc.frequency.value=1000;
+gain.gain.value=0.8;
 
 osc.connect(gain);
 gain.connect(masterGain);
@@ -288,12 +294,12 @@ osc.stop(audioContext.currentTime+0.1);
 
 setTimeout(()=>{
 
-const reaction=performance.now()-start;
+const latency=performance.now()-start;
 
-latencyOffset=reaction/1000;
+latencyOffset=latency/1000;
 
-document.getElementById("latencySlider").value=reaction;
-document.getElementById("latencyValue").textContent=Math.round(reaction);
+document.getElementById("latencySlider").value=latency;
+document.getElementById("latencyValue").textContent=Math.round(latency);
 
 },100);
 
