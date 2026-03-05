@@ -95,7 +95,7 @@ margin:20px 0;
 <script type="module">
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, onValue, update, serverTimestamp }
+import { getDatabase, ref, onValue, update }
 from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
 const firebaseConfig={
@@ -120,18 +120,19 @@ let currentBpm=120;
 
 let startTimeout=null;
 let intervalTimer=null;
-let isStarted=false;
+let countTimer=null;
+
+let running=false;
 
 document.getElementById("enableAudio").onclick=async()=>{
 
 audioContext=new(window.AudioContext||window.webkitAudioContext)();
 
 gainNode=audioContext.createGain();
+gainNode.gain.value=1;
 gainNode.connect(audioContext.destination);
 
 await audioContext.resume();
-
-alert("音声準備OK");
 
 };
 
@@ -151,7 +152,7 @@ update(roomRef,{bpm:currentBpm});
 
 document.getElementById("startBtn").onclick=()=>{
 
-const startTime=Date.now()+4000;
+const startTime=Date.now()+2000;
 
 update(roomRef,{
 isPlaying:true,
@@ -162,25 +163,21 @@ startAt:startTime
 };
 
 document.getElementById("stopBtn").onclick=()=>{
-
 update(roomRef,{isPlaying:false});
-stopClick();
-
+stopAll();
 };
 
-function stopClick(){
+function stopAll(){
 
-isStarted=false;
+running=false;
 
-if(startTimeout){
-clearTimeout(startTimeout);
+if(startTimeout)clearTimeout(startTimeout);
+if(intervalTimer)clearInterval(intervalTimer);
+if(countTimer)clearInterval(countTimer);
+
 startTimeout=null;
-}
-
-if(intervalTimer){
-clearInterval(intervalTimer);
 intervalTimer=null;
-}
+countTimer=null;
 
 document.getElementById("countdown").textContent="";
 
@@ -188,9 +185,9 @@ document.getElementById("countdown").textContent="";
 
 function startSequence(bpm,startAt){
 
-if(isStarted)return;
+if(running)return;
 
-isStarted=true;
+running=true;
 
 const interval=(60/bpm)*1000;
 
@@ -200,17 +197,23 @@ startTimeout=setTimeout(()=>{
 
 let count=4;
 
-const counter=setInterval(()=>{
-
 document.getElementById("countdown").textContent=count;
+
+countTimer=setInterval(()=>{
+
+playClick(true);
 
 flashLed();
 
 count--;
 
-if(count===0){
+if(count>0){
 
-clearInterval(counter);
+document.getElementById("countdown").textContent=count;
+
+}else{
+
+clearInterval(countTimer);
 
 document.getElementById("countdown").textContent="";
 
@@ -224,15 +227,11 @@ startMetronome();
 
 function startMetronome(){
 
-let beat=0;
-
 intervalTimer=setInterval(()=>{
 
-playClick(beat);
+playClick(true);
 
 flashLed();
-
-beat++;
 
 },interval);
 
@@ -240,19 +239,22 @@ beat++;
 
 }
 
-function playClick(beat){
+function playClick(){
 
 if(!audioContext)return;
 
+if(audioContext.state==="suspended"){
+audioContext.resume();
+}
+
 const osc=audioContext.createOscillator();
-const g=audioContext.createGain();
+const gain=audioContext.createGain();
 
-osc.frequency.value=(beat%4===0)?1600:1000;
+osc.frequency.value=1600;
+gain.gain.value=0.4;
 
-g.gain.value=0.4;
-
-osc.connect(g);
-g.connect(gainNode);
+osc.connect(gain);
+gain.connect(gainNode);
 
 osc.start();
 osc.stop(audioContext.currentTime+0.05);
@@ -274,11 +276,9 @@ led.classList.remove("on");
 onValue(roomRef,(snap)=>{
 
 const data=snap.val();
-
 if(!data)return;
 
 currentBpm=data.bpm||120;
-
 document.getElementById("bpmDisplay").textContent=currentBpm;
 
 if(!audioContext)return;
@@ -289,12 +289,13 @@ startSequence(currentBpm,data.startAt);
 
 }else{
 
-stopClick();
+stopAll();
 
 }
 
 });
 
 </script>
+
 </body>
 </html>
