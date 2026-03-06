@@ -1,9 +1,11 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Live Band Monitor</title>
+
+<script src="https://www.youtube.com/iframe_api"></script>
 
 <style>
 
@@ -101,8 +103,15 @@ iframe{
 margin-top:15px;
 }
 
+.latencyBox{
+margin-top:25px;
+border-top:1px solid #00ff9c;
+padding-top:15px;
+}
+
 </style>
 </head>
+
 <body>
 
 <header>LIVE BAND MONITOR</header>
@@ -125,17 +134,7 @@ margin-top:15px;
 <div class="led" id="tempoLed"></div>
 
 <div class="controls">
-<div class="latency">
 
-<button id="measureLatency">Bluetooth遅延測定</button>
-
-<div>
-遅延補正(ms)
-<input type="range" id="latencySlider" min="-300" max="300" value="0">
-<span id="latencyValue">0</span>
-</div>
-
-</div>
 <button id="enableAudio">AUDIO</button>
 <button id="startBtn">START</button>
 <button id="stopBtn">STOP</button>
@@ -158,6 +157,20 @@ MUSIC
 <input type="range" class="fader" id="masterVolume" min="0" max="1" step="0.01" value="1">
 MASTER
 </div>
+
+</div>
+
+<div class="latencyBox">
+
+<h3>Bluetooth遅延測定</h3>
+
+<button id="latencyTest">遅延テスト</button>
+
+<div>測定結果 <span id="latencyValue">0</span> ms</div>
+
+<input type="range" id="latencySlider" min="-300" max="300" value="0" step="1" class="slider">
+
+<div>補正値 <span id="latencyAdjust">0</span> ms</div>
 
 </div>
 
@@ -186,7 +199,7 @@ import { getDatabase, ref, onValue, update, onDisconnect, set }
 from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
 const firebaseConfig={
-apiKey:"AIzaSyAqx-jpLl3Q30iTrHA5YPWJRMI9-abm1Pg",
+apiKey:"AIzaSyAqx",
 authDomain:"earmonitor.firebaseapp.com",
 databaseURL:"https://earmonitor-default-rtdb.firebaseio.com/",
 projectId:"earmonitor"
@@ -209,7 +222,6 @@ onDisconnect(ref(db,"rooms/"+room+"/users/"+userId)).remove();
 onValue(usersRef,(snap)=>{
 
 const data=snap.val();
-
 if(!data)return;
 
 document.getElementById("users").textContent=Object.keys(data).length;
@@ -221,6 +233,11 @@ let clickGain;
 let musicGain;
 let masterGain;
 
+let ytPlayer;
+let ytReady=false;
+
+let latencyOffset=0;
+
 let currentBpm=120;
 
 let nextNoteTime=0;
@@ -230,7 +247,7 @@ let lookahead=25;
 let scheduleAhead=0.1;
 
 let secondsPerBeat=0.5;
-let latencyOffset=0;
+
 document.getElementById("enableAudio").onclick=async()=>{
 
 audioContext=new(window.AudioContext||window.webkitAudioContext)();
@@ -246,21 +263,15 @@ masterGain.connect(audioContext.destination);
 };
 
 document.getElementById("clickVolume").oninput=e=>{
-
 clickGain.gain.value=e.target.value;
-
 };
 
 document.getElementById("musicVolume").oninput=e=>{
-
 musicGain.gain.value=e.target.value;
-
 };
 
 document.getElementById("masterVolume").oninput=e=>{
-
 masterGain.gain.value=e.target.value;
-
 };
 
 const tempoSlider=document.getElementById("tempoSlider");
@@ -277,7 +288,7 @@ update(roomRef,{bpm:currentBpm});
 
 document.getElementById("startBtn").onclick=()=>{
 
-const startTime=Date.now()+2000;
+const startTime=Date.now()+3000;
 
 update(roomRef,{
 startAt:startTime,
@@ -356,7 +367,13 @@ document.getElementById("shareYT").onclick=()=>{
 
 const url=document.getElementById("youtubeURL").value;
 
-update(roomRef,{youtube:url});
+const id=url.split("v=")[1].split("&")[0];
+
+update(roomRef,{
+youtube:id,
+ytStart:Date.now(),
+ytPlay:true
+});
 
 };
 
@@ -368,7 +385,10 @@ const reader=new FileReader();
 
 reader.onload=e=>{
 
-update(roomRef,{mp3:e.target.result});
+update(roomRef,{
+mp3:e.target.result,
+mp3Start:Date.now()
+});
 
 };
 
@@ -376,10 +396,54 @@ reader.readAsDataURL(file);
 
 };
 
+window.onYouTubeIframeAPIReady=function(){
+
+ytPlayer=new YT.Player("youtubePlayer",{
+
+height:"170",
+width:"300",
+videoId:"",
+playerVars:{playsinline:1},
+
+events:{
+onReady:()=>{
+ytReady=true;
+}
+}
+
+});
+
+};
+
+document.getElementById("latencyTest").onclick=async()=>{
+
+const start=audioContext.currentTime;
+
+playClick(start);
+
+setTimeout(()=>{
+
+const end=audioContext.currentTime;
+
+const diff=(end-start)*1000;
+
+document.getElementById("latencyValue").textContent=Math.round(diff);
+
+},200);
+
+};
+
+document.getElementById("latencySlider").oninput=e=>{
+
+latencyOffset=parseInt(e.target.value)/1000;
+
+document.getElementById("latencyAdjust").textContent=e.target.value;
+
+};
+
 onValue(roomRef,(snap)=>{
 
 const data=snap.val();
-
 if(!data)return;
 
 currentBpm=data.bpm||120;
@@ -397,62 +461,37 @@ stopMetronome();
 
 }
 
-if(data.youtube){
+if(data.youtube && ytReady){
 
-const id=data.youtube.split("v=")[1];
+if(ytPlayer.getVideoData().video_id!==data.youtube){
 
-document.getElementById("youtubePlayer").innerHTML=
-`<iframe width="300" height="170"
-src="https://www.youtube-nocookie.com/embed/${id}"
-allowfullscreen></iframe>`;
+ytPlayer.loadVideoById(data.youtube);
+
+}
+
+const diff=(Date.now()-data.ytStart)/1000;
+
+ytPlayer.seekTo(diff,true);
+ytPlayer.playVideo();
 
 }
 
 if(data.mp3){
 
-document.getElementById("audioPlayer").src=data.mp3;
+const player=document.getElementById("audioPlayer");
+
+player.src=data.mp3;
+
+const diff=(Date.now()-data.mp3Start)/1000;
+
+player.currentTime=diff;
+
+player.play();
 
 }
 
 });
-document.getElementById("measureLatency").onclick=()=>{
 
-if(!audioContext)return;
-
-const osc=audioContext.createOscillator();
-const gain=audioContext.createGain();
-
-osc.frequency.value=1000;
-gain.gain.value=0.8;
-
-osc.connect(gain);
-gain.connect(masterGain);
-
-const start=performance.now();
-
-osc.start();
-osc.stop(audioContext.currentTime+0.1);
-
-setTimeout(()=>{
-
-const latency=performance.now()-start;
-
-latencyOffset=latency/1000;
-
-document.getElementById("latencySlider").value=latency;
-document.getElementById("latencyValue").textContent=Math.round(latency);
-
-},100);
-
-};
-
-document.getElementById("latencySlider").oninput=e=>{
-
-latencyOffset=e.target.value/1000;
-
-document.getElementById("latencyValue").textContent=e.target.value;
-
-};
 </script>
 
 </body>
